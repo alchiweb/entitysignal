@@ -2,7 +2,7 @@
 
   <PropertyGroup>
     <TargetFramework>netcoreapp3.1</TargetFramework>
-    <Version>1.0.4</Version>
+    <Version>1.0.4-beta</Version>
     <Authors>EntitySignal Team</Authors>
     <Company></Company>
     <Description>Connect to Entity Signal via C#</Description>
