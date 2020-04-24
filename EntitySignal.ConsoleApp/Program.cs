@@ -2,6 +2,7 @@
 using EntitySignal.Client.Enums;
 using Newtonsoft.Json.Linq;
 using System;
+using System.Threading.Tasks;
 
 namespace EntitySignal.ConsoleApp
 {
@@ -85,7 +86,7 @@ namespace EntitySignal.ConsoleApp
 
     private static async void OnStatusChanged(EntitySignalStatus status)
     {
-      Console.WriteLine($"Status: {status}");
+      await Task.Run(() => Console.WriteLine($"Status: {status}"));
     }
   }
 }
