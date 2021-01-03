@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Identity.UI;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.AspNetCore.HttpsPolicy;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -20,6 +21,7 @@ using Microsoft.Extensions.FileProviders;
 using System.IO;
 using Newtonsoft.Json.Serialization;
 using Microsoft.Extensions.Hosting;
+
 namespace EntitySignal
 {
   public class Startup
@@ -47,16 +49,11 @@ namespace EntitySignal
       services.AddDbContext<ApplicationDbContext>(options =>
           options.UseNpgsql(Configuration.GetConnectionString("DefaultConnection")));
 
-      services.AddDefaultIdentity<IdentityUser>()
+      services.AddDefaultIdentity<IdentityUser>(options => options.SignIn.RequireConfirmedAccount = true)
           .AddEntityFrameworkStores<ApplicationDbContext>();
 
       if (CurrentEnvironment.IsDevelopment())
       {
-        //services.Configure<MvcOptions>(options =>
-        //{
-        //  options.Filters.Add(new CorsAuthorizationFilterFactory("AllowAnyOrigin"));
-        //});
-
         services.AddCors(options =>
         {
           options.AddPolicy("AllowAnyOrigin",
@@ -68,8 +65,7 @@ namespace EntitySignal
         });
       }
 
-      services.AddMvc()
-        //.SetCompatibilityVersion(CompatibilityVersion.Version_2_2)
+      services.AddMvc(option => option.EnableEndpointRouting = false)
         .AddNewtonsoftJson(options =>
         {
           options.SerializerSettings.ContractResolver = new DefaultContractResolver();
@@ -89,7 +85,7 @@ namespace EntitySignal
       if (env.IsDevelopment())
       {
         app.UseDeveloperExceptionPage();
-        app.UseDatabaseErrorPage();
+        app.UseCors("AllowAnyOrigin");
       }
       else
       {
@@ -109,10 +105,9 @@ namespace EntitySignal
 
       app.UseRouting();
       if (env.IsDevelopment())
-          app.UseCors("AllowAnyOrigin");
+         app.UseCors("AllowAnyOrigin");
 
       app.UseAuthentication();
-
       app.UseWebSockets();
 
       app.UseEndpoints(endpoints =>
@@ -120,7 +115,6 @@ namespace EntitySignal
           endpoints.MapControllerRoute("default", "{controller=Home}/{action=Index}/{id?}");
           endpoints.MapHub<EntitySignalHub>("/dataHub");
       });
-
     }
   }
 }

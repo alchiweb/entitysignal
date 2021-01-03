@@ -8,7 +8,7 @@ or
 
 #### Add Javascript Files To Html After SignalR
 ```html
-<script src="https://cdn.jsdelivr.net/npm/@microsoft/signalr@3.1.3/dist/browser/signalr.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@microsoft/signalr@5.0.1/dist/browser/signalr.min.js"></script>
 <script src="~/dist/entitySignal.js"></script>
 ```
 

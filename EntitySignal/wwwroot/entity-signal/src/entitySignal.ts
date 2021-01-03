@@ -4,7 +4,7 @@
     Unchanged = 1,
     Deleted = 2,
     Modified = 3,
-    Added = 4    
+    Added = 4
   };
 
   interface DataContainer<T> {
@@ -39,6 +39,10 @@
     [key: string]: any[];
   }
 
+  interface PendingHardRefreshes {
+    [key: string]: Promise<any>;
+  }
+
   export interface EntitySignalOptions {
     autoreconnect: boolean;
     reconnectMinTime: number;
@@ -50,11 +54,12 @@
     returnDeepCopy: boolean;
     defaultId: string;
     defaultIdAlt: string;
+    spliceModifications: boolean;
   }
 
   type OnStatusChangedCallback = (status: EntitySignalStatus) => void;
   type OnSyncCallback = (newData: UserResult) => void;
-  type OnUrlDataChangeCallback = (urlData:any) => void;
+  type OnUrlDataChangeCallback = (urlData: any) => void;
 
   interface UrlCallbackContainer {
     [key: string]: OnUrlDataChangeCallback[];
@@ -62,6 +67,7 @@
 
   export class Client {
     subscriptions: SyncSubscription;
+    pendingHardRefreshes: PendingHardRefreshes;
     hub: any;
     options: EntitySignalOptions;
     private connectingDefer: Promise<void>;
@@ -93,7 +99,8 @@
         maxWaitForConnectionId: 5000,
         returnDeepCopy: false,
         defaultId: "id",
-        defaultIdAlt: "Id"
+        defaultIdAlt: "Id",
+        spliceModifications: false
       };
 
       if (options) {
@@ -102,9 +109,10 @@
 
       this.onStatusChangeCallbacks = [];
       this.onSyncCallbacks = [];
-      this.onUrlCallbacks = <UrlCallbackContainer> {};
+      this.onUrlCallbacks = <UrlCallbackContainer>{};
 
       this.subscriptions = {};
+      this.pendingHardRefreshes = {};
       this.status = EntitySignalStatus.Disconnected;
 
       this.hub = new window["signalR"].HubConnectionBuilder().withUrl(this.options.hubUrl, window["signalR"].HttpTransportType.WebSockets).build();
@@ -293,23 +301,23 @@
         url.data.forEach(x => {
           if (x.state == EntityState.Added || x.state == EntityState.Modified) {
             var changeCount = 0;
-            this.subscriptions[url.url].forEach((msg, index) => {
-              //check default ID type
-              if (x.object[this.options.defaultId]) {
-                if (x.object[this.options.defaultId] == msg[this.options.defaultId]) {
-                  this.subscriptions[url.url].splice(index, 1, x.object);
-                  changeCount++;
-                }
-              }
 
-              //check alt ID type
-              if (x.object[this.options.defaultIdAlt]) {
-                if (x.object[this.options.defaultIdAlt] == msg[this.options.defaultIdAlt]) {
+            //check if already in list
+            this.subscriptions[url.url].forEach((msg, index) => {
+
+              if (this.idsMatch(x.object, msg)) {
+                if (this.options.spliceModifications) {
                   this.subscriptions[url.url].splice(index, 1, x.object);
+                }
+                else {
+                  this.updateObjectWhilePersistingReference(this.subscriptions[url.url][index], x.object);
                   changeCount++;
                 }
+                changeCount++;
               }
             })
+
+            //if not in the list then add to end of list
             if (changeCount == 0) {
               this.subscriptions[url.url].push(x.object);
             }
@@ -319,17 +327,8 @@
               var currentRow = this.subscriptions[url.url][i];
 
               //check default ID type
-              if (x.object[this.options.defaultId]) {
-                if (currentRow[this.options.defaultId] == x.object[this.options.defaultId]) {
-                  this.subscriptions[url.url].splice(i, 1);
-                }
-              }
-
-              //check alt ID type
-              if (x.object[this.options.defaultIdAlt]) {
-                if (currentRow[this.options.defaultIdAlt] == x.object[this.options.defaultIdAlt]) {
-                  this.subscriptions[url.url].splice(i, 1);
-                }
+              if (this.idsMatch(x.object, currentRow)) {
+                this.clearArrayItem(this.subscriptions[url.url], i);
               }
             }
           }
@@ -337,6 +336,90 @@
       });
 
       return changedUrls;
+    }
+
+    idsMatch(object1: any, object2: any): boolean {
+      var obj1Id = this.getId(object1);
+      var obj2Id = this.getId(object2);
+
+      if (obj1Id && obj2Id && obj1Id == obj2Id) {
+        return true;
+      }
+
+      return false;
+    }
+
+    getId(obj: any): number {
+      if (obj[this.options.defaultId]) {
+        return obj[this.options.defaultId];
+      }
+
+      if (obj[this.options.defaultIdAlt]) {
+        return obj[this.options.defaultIdAlt];
+      }
+
+      return null;
+    }
+
+    updateArrayWhilePersistingObjectReferences(target: any[], source: any[], ) {
+      var targetArrayItemsToRemove: number[] = [];
+
+      //to make this efficient we need to index the source array
+      //create data structure of indexedSource["idValue"] = arrayIndexValue
+      var indexedSource = {};
+      source.forEach((sourceValue, index) => {
+        var sourceId = this.getId(sourceValue);
+        if (sourceId) {
+          indexedSource[sourceId] = index;
+        }
+      })
+
+      //now that we can do a O(1) lookup we can quickly merge the source into the target
+      target.forEach((targetValue, index) => {
+        var targetId = this.getId(targetValue);
+        var matchingSourceIndex = indexedSource[targetId];
+        var matchingSourceValue = source[matchingSourceIndex];
+
+        //if found then update the reference
+        if (indexedSource[targetId]) {
+          this.updateObjectWhilePersistingReference(targetValue, matchingSourceValue)
+        }
+        else {
+          //if not found mark for deletion
+          targetArrayItemsToRemove.push(index)
+        }
+      });
+
+      //go through the items to remove list in reverse and remove them
+      targetArrayItemsToRemove.slice().reverse().forEach(indexToRemove => {
+        this.clearArrayItem(target, indexToRemove);
+      });
+    }
+
+    updateObjectWhilePersistingReference(target: any, source: any) {
+      this.clearObject(target);
+
+      //copy back (to keep the same object reference)
+      Object.assign(target, source);
+    }
+
+    clearObject(obj: any) {
+      //clear object
+      var objectReference = obj;
+      for (var variableKey in objectReference) {
+        if (variableKey.startsWith("$$")) {
+          continue;
+        }
+
+        if (objectReference.hasOwnProperty(variableKey)) {
+          delete objectReference[variableKey];
+        }
+      }
+    }
+
+    clearArrayItem(array: any[], i: number) {
+      this.clearObject(array[i])
+      array.splice(i, 1);
     }
 
     desyncFrom(url: string): Promise<void> {
@@ -357,7 +440,11 @@
     }
 
     hardRefresh(url: string) {
-      return new Promise((resolve, reject) => {
+      if (this.pendingHardRefreshes[url]) {
+        return this.pendingHardRefreshes[url];
+      }
+
+      var hardRefreshPromise = new Promise((resolve, reject) => {
         this.connect().then(() => {
 
           var xhr = new XMLHttpRequest();
@@ -367,19 +454,31 @@
 
           xhr.onreadystatechange = () => {
             if (xhr.readyState == 4) {
+              this.pendingHardRefreshes[url] = null;
+
               if (xhr.status == 200) {
                 var data = JSON.parse(xhr.responseText);
 
+                //update the subscription
                 if (this.subscriptions[url] == null) {
                   this.subscriptions[url] = data;
                 }
                 else {
-                  this.subscriptions[url].splice(0);
-                  data.forEach(y => {
-                    this.subscriptions[url].push(y);
-                  });
+                  //if return deep dopy then just splice and swap the list
+                  if (this.options.returnDeepCopy) {
+                    this.subscriptions[url].splice(0);
+                    data.forEach(y => {
+                      this.subscriptions[url].push(y);
+                    });
+                  }
+                  else {
+                    //if not return deep copy then we must keep the object references
+                    this.updateArrayWhilePersistingObjectReferences(data, this.subscriptions[url]);
+                  }
                 }
 
+
+                //resolve the promise
                 if (this.options.returnDeepCopy) {
                   var deepCopy = JSON.parse(JSON.stringify(this.subscriptions[url]));
                   resolve(deepCopy);
@@ -396,7 +495,7 @@
                 resolve(this.subscriptions[url]);
               }
               else {
-                reject(xhr.responseText);
+                reject(xhr);
               }
             }
           }
@@ -404,6 +503,10 @@
           xhr.send();
         });
       });
+
+      this.pendingHardRefreshes[url] = hardRefreshPromise;
+
+      return hardRefreshPromise;
     }
 
     syncWith(url: string): Promise<any> {

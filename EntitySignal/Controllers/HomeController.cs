@@ -22,7 +22,7 @@ namespace EntitySignal.Controllers
   [ResponseCache(NoStore = true, Duration = 0)]
   public class HomeController : Controller
   {
-    private IWebHostEnvironment _hostingEnvironment;
+    private readonly IWebHostEnvironment _hostingEnvironment;
 
     public HomeController(
       IWebHostEnvironment hostingEnvironment
